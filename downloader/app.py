@@ -137,15 +137,13 @@ def extract_media_from_page(page):
         src = img.get_attribute('src')
         alt = img.get_attribute('alt') or ''
 
-        # Filter for Instagram post images
-        # Instagram posts typically have "Photo by" in alt or specific src patterns
-        if src and ('Photo by' in alt or 'scontent' in src):
-            # Avoid profile pictures and small thumbnails
-            if 'p320x320' not in src and 'p150x150' not in src:
-                media_items.append({
-                    'url': src,
-                    'type': 'image'
-                })
+        # Only accept images where alt text starts with "Photo by "
+        # This ensures we only get post content, not profile pictures, logos, etc.
+        if src and alt.startswith('Photo by '):
+            media_items.append({
+                'url': src,
+                'type': 'image'
+            })
 
     # Extract videos
     video_elements = page.query_selector_all('video')
