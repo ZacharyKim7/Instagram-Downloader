@@ -15,6 +15,7 @@ load_dotenv()
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/images'
 app.config['SESSION_FOLDER'] = 'session_data'
+app.config['FILE_RETENTION_MINUTES'] = 30  # Keep files for 30 minutes
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['SESSION_FOLDER'], exist_ok=True)
@@ -24,6 +25,39 @@ INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME', '')
 INSTAGRAM_PASSWORD = os.getenv('INSTAGRAM_PASSWORD', '')
 SESSION_FILE = os.path.join(app.config['SESSION_FOLDER'], 'instagram_session.json')
 
+def cleanup_old_files():
+    """
+    Removes downloaded media files older than FILE_RETENTION_MINUTES.
+    This prevents storage buildup from accumulated downloads.
+    """
+    try:
+        retention_seconds = app.config['FILE_RETENTION_MINUTES'] * 60
+        current_time = time.time()
+        deleted_count = 0
+
+        for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+            # Skip directories and .gitkeep files
+            if os.path.isdir(filepath) or filename == '.gitkeep':
+                continue
+
+            # Check file age
+            file_age = current_time - os.path.getmtime(filepath)
+
+            if file_age > retention_seconds:
+                try:
+                    os.remove(filepath)
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"Failed to delete {filename}: {e}")
+
+        if deleted_count > 0:
+            print(f"Cleaned up {deleted_count} old file(s)")
+
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -31,6 +65,9 @@ def index():
 @app.route('/extract-images', methods=['POST'])
 def extract_images():
     try:
+        # Clean up old files before processing new request
+        cleanup_old_files()
+
         data = request.get_json()
         url = data.get('url')
 

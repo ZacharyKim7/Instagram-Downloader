@@ -1,0 +1,2 @@
+# This file ensures the static/images directory exists in git
+# Actual media files are temporary and automatically cleaned up

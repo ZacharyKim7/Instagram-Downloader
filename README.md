@@ -68,11 +68,13 @@ The app will be available at `http://localhost:5000`
 - **Backend:** Python, Flask, Playwright
 - **Browser:** Chromium (headless)
 - **Session Management:** Cookies stored in `session_data/`
-- **Media Storage:** Downloaded files saved to `static/images/`
+- **Media Storage:** Downloaded files temporarily saved to `static/images/`
+- **Auto-Cleanup:** Files older than 30 minutes are automatically deleted
 
 ## Privacy & Security
 
 - Instagram credentials are only stored in your local `.env` file
 - Login sessions are saved locally in `session_data/`
 - Both `.env` and `session_data/` are excluded from git via `.gitignore`
+- Downloaded media files are temporary and automatically deleted after 30 minutes
 - The app can still work without credentials, but may hit Instagram's login wall after ~3 posts
