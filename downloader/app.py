@@ -62,56 +62,140 @@ def instagram_login(page):
         print(f"Attempting to log in as {INSTAGRAM_USERNAME}...")
 
         # Go to Instagram login page
-        page.goto('https://www.instagram.com/accounts/login/')
-        page.wait_for_load_state('networkidle')
-        time.sleep(2)
+        page.goto('https://www.instagram.com/accounts/login/', timeout=60000)
+        page.wait_for_load_state('networkidle', timeout=30000)
+        time.sleep(3)
 
-        # Fill in username
-        username_input = page.wait_for_selector('input[name="username"]', timeout=10000)
-        username_input.fill(INSTAGRAM_USERNAME)
+        # Try multiple selector patterns for username input
+        username_input = None
+        username_selectors = [
+            'input[name="username"]',
+            'input[aria-label="Phone number, username, or email"]',
+            'input[type="text"]'
+        ]
 
-        # Fill in password
+        for selector in username_selectors:
+            try:
+                username_input = page.wait_for_selector(selector, timeout=5000)
+                if username_input:
+                    print(f"Found username input with selector: {selector}")
+                    break
+            except:
+                continue
+
+        if not username_input:
+            print("Error: Could not find username input field")
+            return False
+
+        # Type username slowly to mimic human behavior
+        username_input.click()
+        username_input.fill('')
+        username_input.type(INSTAGRAM_USERNAME, delay=100)
+        time.sleep(1)
+
+        # Find password input
         password_input = page.query_selector('input[name="password"]')
-        password_input.fill(INSTAGRAM_PASSWORD)
+        if not password_input:
+            password_input = page.query_selector('input[type="password"]')
 
-        # Click login button
+        if not password_input:
+            print("Error: Could not find password input field")
+            return False
+
+        # Type password slowly
+        password_input.click()
+        password_input.fill('')
+        password_input.type(INSTAGRAM_PASSWORD, delay=100)
+        time.sleep(1)
+
+        # Find and click login button
         login_button = page.query_selector('button[type="submit"]')
+        if not login_button:
+            login_button = page.query_selector('button:has-text("Log in")')
+
+        if not login_button:
+            print("Error: Could not find login button")
+            return False
+
+        print("Clicking login button...")
         login_button.click()
 
-        # Wait for navigation after login
-        time.sleep(5)
+        # Wait for navigation after login with longer timeout
+        try:
+            page.wait_for_url(lambda url: 'login' not in url.lower(), timeout=15000)
+            print("Redirected away from login page")
+        except:
+            print("Still on login-related page after 15s")
 
-        # Check if login was successful by looking for common post-login elements
-        # or checking if we're redirected away from login page
+        time.sleep(3)
+
+        # Check current URL
         current_url = page.url
+        print(f"Current URL after login attempt: {current_url}")
+
+        # Check for error messages
+        error_element = page.query_selector('div#slfErrorAlert, p[data-testid="login-error-message"]')
+        if error_element:
+            error_text = error_element.inner_text()
+            print(f"Login error message: {error_text}")
+            return False
 
         # Dismiss "Save Login Info" prompt if it appears
         try:
-            not_now_button = page.query_selector('button:has-text("Not now")')
-            if not_now_button:
-                not_now_button.click()
-                time.sleep(1)
-        except:
-            pass
+            save_info_selectors = [
+                'button:has-text("Not now")',
+                'button:has-text("Not Now")',
+                '//button[contains(text(), "Not")]'
+            ]
+            for selector in save_info_selectors:
+                not_now_button = page.query_selector(selector)
+                if not_now_button and not_now_button.is_visible():
+                    print("Dismissing 'Save Login Info' prompt")
+                    not_now_button.click()
+                    time.sleep(1)
+                    break
+        except Exception as e:
+            print(f"Error dismissing save info prompt: {e}")
 
         # Dismiss "Turn on Notifications" prompt if it appears
         try:
-            not_now_button = page.query_selector('button:has-text("Not Now")')
-            if not_now_button:
-                not_now_button.click()
-                time.sleep(1)
-        except:
-            pass
+            time.sleep(2)
+            notification_selectors = [
+                'button:has-text("Not Now")',
+                'button:has-text("Not now")',
+                '//button[contains(text(), "Not")]'
+            ]
+            for selector in notification_selectors:
+                not_now_button = page.query_selector(selector)
+                if not_now_button and not_now_button.is_visible():
+                    print("Dismissing 'Turn on Notifications' prompt")
+                    not_now_button.click()
+                    time.sleep(1)
+                    break
+        except Exception as e:
+            print(f"Error dismissing notifications prompt: {e}")
 
-        if 'login' not in current_url.lower():
-            print("Login successful!")
-            return True
-        else:
-            print("Login may have failed - still on login page")
-            return False
+        # Check if we're logged in
+        time.sleep(2)
+        current_url = page.url
+
+        # Multiple checks for successful login
+        if 'login' not in current_url.lower() or 'instagram.com/' in current_url:
+            # Additional check: look for logged-in elements
+            profile_link = page.query_selector('a[href*="/accounts/activity/"]')
+            home_link = page.query_selector('svg[aria-label="Home"]')
+
+            if profile_link or home_link or 'challenge' not in current_url.lower():
+                print("Login successful!")
+                return True
+
+        print(f"Login may have failed - current URL: {current_url}")
+        return False
 
     except Exception as e:
-        print(f"Login failed: {e}")
+        print(f"Login failed with exception: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def save_session(context):
@@ -143,30 +227,6 @@ def load_session(context):
         print(f"Failed to load session: {e}")
         return False
 
-def is_logged_in(page):
-    """
-    Checks if the current page shows that we're logged into Instagram.
-    """
-    try:
-        # Navigate to Instagram home to check login status
-        page.goto('https://www.instagram.com/', timeout=30000)
-        page.wait_for_load_state('networkidle')
-        time.sleep(2)
-
-        # If we see the login button, we're not logged in
-        # If we see profile/home elements, we are logged in
-        login_link = page.query_selector('a[href="/accounts/login/"]')
-
-        if login_link:
-            print("Not logged in - login link found")
-            return False
-        else:
-            print("Already logged in")
-            return True
-    except Exception as e:
-        print(f"Error checking login status: {e}")
-        return False
-
 def scrape_media(url):
     """
     Scrapes both images and videos from Instagram posts.
@@ -186,22 +246,49 @@ def scrape_media(url):
 
         page = context.new_page()
 
-        # If we have credentials, check if we're logged in and login if needed
+        # If we have credentials and no session, login
         if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
-            if not session_loaded or not is_logged_in(page):
+            if not session_loaded:
                 # Need to login
+                print("No existing session found, logging in...")
                 if instagram_login(page):
                     # Save session after successful login
                     save_session(context)
                 else:
                     print("Warning: Login failed, continuing without authentication")
+            else:
+                print("Using existing session")
 
-        # Navigate to the target post
-        page.goto(url)
-        page.wait_for_load_state('networkidle')
+        # Navigate to the target post with increased timeout
+        print(f"Navigating to post: {url}")
+        try:
+            page.goto(url, timeout=60000)
+            page.wait_for_load_state('networkidle', timeout=30000)
+        except Exception as e:
+            print(f"Warning: Page load timeout or error: {e}")
+            # Continue anyway, page might be partially loaded
 
         # Wait a bit for dynamic content to load
-        time.sleep(2)
+        time.sleep(3)
+
+        # Check if we hit a login wall
+        current_url = page.url
+        if 'accounts/login' in current_url:
+            print("Hit Instagram login wall. Session may have expired.")
+            if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
+                print("Attempting to login again...")
+                if instagram_login(page):
+                    save_session(context)
+                    # Navigate to target post again
+                    page.goto(url, timeout=60000)
+                    page.wait_for_load_state('networkidle', timeout=30000)
+                    time.sleep(3)
+                else:
+                    print("Login failed, cannot access post")
+                    return []
+            else:
+                print("No credentials provided, cannot bypass login wall")
+                return []
 
         # Check if this is a carousel post by looking for next button
         # Instagram carousel posts have next/previous buttons
