@@ -273,6 +273,7 @@ def scrape_media(url):
     """
     media_items = []
     seen_urls = set()
+    captured_video_urls = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -282,6 +283,26 @@ def scrape_media(url):
         session_loaded = load_session(context)
 
         page = context.new_page()
+
+        # Set up request interception to capture video URLs
+        def handle_request(request):
+            # Capture video file requests from Instagram CDN
+            url = request.url
+            # Look for video files from Instagram's CDN
+            is_video = (
+                # Check for video file extensions
+                any(ext in url for ext in ['.mp4', '.mov', '.webm']) or
+                # Check for Instagram CDN domains with video in path
+                ('scontent' in url and 'video' in url) or
+                # Check for fbcdn (Facebook CDN used by Instagram)
+                ('fbcdn' in url and 'video' in url)
+            )
+
+            if is_video and url not in captured_video_urls:
+                print(f"Captured video URL from network: {url}")
+                captured_video_urls.append(url)
+
+        page.on('request', handle_request)
 
         # If we have credentials and no session, login
         if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
@@ -307,6 +328,22 @@ def scrape_media(url):
 
         # Wait a bit for dynamic content to load
         time.sleep(3)
+
+        # Check if this page has video content - if so, wait longer for video to load
+        has_video = page.query_selector('video') is not None
+        if has_video:
+            print("Video detected, waiting for video to load...")
+            time.sleep(5)  # Extra time for video blob to resolve
+
+            # Check if we still have blob URLs - if so, reload the page
+            video_element = page.query_selector('video')
+            if video_element:
+                video_src = video_element.get_attribute('src')
+                if video_src and video_src.startswith('blob:'):
+                    print("Video still using blob URL, reloading page to get real URL...")
+                    page.reload(timeout=60000)
+                    page.wait_for_load_state('networkidle', timeout=30000)
+                    time.sleep(3)
 
         # Check if we hit a login wall
         current_url = page.url
@@ -385,6 +422,13 @@ def scrape_media(url):
         context.close()
         browser.close()
 
+    # Add captured video URLs from network requests
+    for video_url in captured_video_urls:
+        media_items.append({
+            'url': video_url,
+            'type': 'video'
+        })
+
     # Remove duplicates while preserving order
     unique_media = []
     seen = set()
@@ -392,6 +436,8 @@ def scrape_media(url):
         if item['url'] not in seen:
             unique_media.append(item)
             seen.add(item['url'])
+
+    print(f"Total media items found: {len(unique_media)} ({sum(1 for m in unique_media if m['type'] == 'image')} images, {sum(1 for m in unique_media if m['type'] == 'video')} videos)")
 
     return unique_media
 
@@ -417,7 +463,7 @@ def extract_media_from_page(page):
                 'type': 'image'
             })
 
-    # Extract videos
+    # Extract videos - handle blob URLs
     video_elements = page.query_selector_all('video')
     for video in video_elements:
         # Try to get video source from src attribute
@@ -431,11 +477,19 @@ def extract_media_from_page(page):
                 if src:
                     break
 
+        # If we found a video source, check if it's a blob URL
         if src:
-            media_items.append({
-                'url': src,
-                'type': 'video'
-            })
+            # Blob URLs won't work for downloading, need to get the real URL
+            if src.startswith('blob:'):
+                print(f"Found blob URL: {src}, attempting to get real URL...")
+                # Blob URLs are useless for downloading, skip for now
+                # We'll use network interception to get the real URL
+                continue
+            else:
+                media_items.append({
+                    'url': src,
+                    'type': 'video'
+                })
 
     return media_items
 
