@@ -1,0 +1,1 @@
+The purpose of this application is to accept the share link of an Instagram post and serve the content to the user to be downloaded. This application is built using Python, Flask, and Playwright. Eventually, the frontend will be built using React, but currently, we will implement the full app in the downloader/ directory.

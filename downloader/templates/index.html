@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image Extractor</title>
+    <title>Instagram Media Downloader</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -129,16 +129,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>🖼️ Image Extractor</h1>
+        <h1>📸 Instagram Media Downloader</h1>
 
         <div class="input-section">
-            <input type="url" id="urlInput" placeholder="Enter website URL (e.g., https://example.com)" required>
-            <button onclick="extractImages()" id="extractBtn">Extract Images</button>
+            <input type="url" id="urlInput" placeholder="Enter Instagram post URL (e.g., https://www.instagram.com/p/...)" required>
+            <button onclick="extractImages()" id="extractBtn">Download Media</button>
         </div>
 
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <p>Extracting images...</p>
+            <p>Extracting media...</p>
         </div>
 
         <div class="results" id="results"></div>
@@ -179,9 +179,9 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    displayImages(data.images, data.total);
+                    displayMedia(data.media, data.total);
                 } else {
-                    showError(data.error || 'Failed to extract images');
+                    showError(data.error || 'Failed to extract media');
                 }
             } catch (error) {
                 showError('Network error: ' + error.message);
@@ -191,43 +191,64 @@
             }
         }
 
-        function displayImages(images, total) {
+        function displayMedia(mediaItems, total) {
             const results = document.getElementById('results');
 
-            if (images.length === 0) {
-                results.innerHTML = '<div class="error">No images found on this webpage.</div>';
+            if (mediaItems.length === 0) {
+                results.innerHTML = '<div class="error">No media found on this webpage.</div>';
                 return;
             }
 
+            const imageCount = mediaItems.filter(m => m.type === 'image').length;
+            const videoCount = mediaItems.filter(m => m.type === 'video').length;
+
+            let mediaText = [];
+            if (imageCount > 0) mediaText.push(`${imageCount} image${imageCount > 1 ? 's' : ''}`);
+            if (videoCount > 0) mediaText.push(`${videoCount} video${videoCount > 1 ? 's' : ''}`);
+
             results.innerHTML = `
                 <div class="success">
-                    Found ${total} image(s) on the webpage!
+                    Found ${mediaText.join(' and ')} on the webpage!
                 </div>
                 <div class="image-grid" id="imageGrid"></div>
             `;
 
             const imageGrid = document.getElementById('imageGrid');
 
-            images.forEach((image, index) => {
-                const imageCard = document.createElement('div');
-                imageCard.className = 'image-card';
+            mediaItems.forEach((media, index) => {
+                const mediaCard = document.createElement('div');
+                mediaCard.className = 'image-card';
 
-                imageCard.innerHTML = `
-                    <img src="${image.local_path}" alt="Extracted image ${index + 1}"
-                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                    <div style="display:none; color: #dc3545;">Failed to load image</div>
+                let mediaContent = '';
+                if (media.type === 'image') {
+                    mediaContent = `
+                        <img src="${media.local_path}" alt="Extracted image ${index + 1}"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                        <div style="display:none; color: #dc3545;">Failed to load image</div>
+                    `;
+                } else if (media.type === 'video') {
+                    mediaContent = `
+                        <video src="${media.local_path}" controls style="max-width: 100%; max-height: 200px; border-radius: 5px; margin-bottom: 10px;">
+                            Your browser does not support the video tag.
+                        </video>
+                    `;
+                }
+
+                mediaCard.innerHTML = `
+                    ${mediaContent}
                     <div class="image-info">
-                        Size: ${formatFileSize(image.size)}<br>
-                        <small title="${image.original_url}">
-                            ${truncateUrl(image.original_url, 40)}
+                        Type: ${media.type.toUpperCase()}<br>
+                        Size: ${formatFileSize(media.size)}<br>
+                        <small title="${media.original_url}">
+                            ${truncateUrl(media.original_url, 40)}
                         </small>
                     </div>
-                    <button class="download-btn" onclick="downloadImage('${image.filename}')">
+                    <button class="download-btn" onclick="downloadImage('${media.filename}')">
                         Download
                     </button>
                 `;
 
-                imageGrid.appendChild(imageCard);
+                imageGrid.appendChild(mediaCard);
             });
         }
 
