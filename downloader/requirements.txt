@@ -2,3 +2,4 @@ Flask
 playwright
 requests
 Pillow
+python-dotenv

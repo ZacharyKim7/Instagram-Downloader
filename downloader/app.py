@@ -6,11 +6,23 @@ import uuid
 from urllib.parse import urljoin, urlparse
 import mimetypes
 import time
+import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/images'
+app.config['SESSION_FOLDER'] = 'session_data'
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['SESSION_FOLDER'], exist_ok=True)
+
+# Instagram credentials from environment variables
+INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME', '')
+INSTAGRAM_PASSWORD = os.getenv('INSTAGRAM_PASSWORD', '')
+SESSION_FILE = os.path.join(app.config['SESSION_FOLDER'], 'instagram_session.json')
 
 @app.route('/')
 def index():
@@ -37,10 +49,129 @@ def extract_images():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def instagram_login(page):
+    """
+    Logs into Instagram using provided credentials.
+    Returns True if login successful, False otherwise.
+    """
+    if not INSTAGRAM_USERNAME or not INSTAGRAM_PASSWORD:
+        print("Warning: Instagram credentials not provided. Proceeding without login.")
+        return False
+
+    try:
+        print(f"Attempting to log in as {INSTAGRAM_USERNAME}...")
+
+        # Go to Instagram login page
+        page.goto('https://www.instagram.com/accounts/login/')
+        page.wait_for_load_state('networkidle')
+        time.sleep(2)
+
+        # Fill in username
+        username_input = page.wait_for_selector('input[name="username"]', timeout=10000)
+        username_input.fill(INSTAGRAM_USERNAME)
+
+        # Fill in password
+        password_input = page.query_selector('input[name="password"]')
+        password_input.fill(INSTAGRAM_PASSWORD)
+
+        # Click login button
+        login_button = page.query_selector('button[type="submit"]')
+        login_button.click()
+
+        # Wait for navigation after login
+        time.sleep(5)
+
+        # Check if login was successful by looking for common post-login elements
+        # or checking if we're redirected away from login page
+        current_url = page.url
+
+        # Dismiss "Save Login Info" prompt if it appears
+        try:
+            not_now_button = page.query_selector('button:has-text("Not now")')
+            if not_now_button:
+                not_now_button.click()
+                time.sleep(1)
+        except:
+            pass
+
+        # Dismiss "Turn on Notifications" prompt if it appears
+        try:
+            not_now_button = page.query_selector('button:has-text("Not Now")')
+            if not_now_button:
+                not_now_button.click()
+                time.sleep(1)
+        except:
+            pass
+
+        if 'login' not in current_url.lower():
+            print("Login successful!")
+            return True
+        else:
+            print("Login may have failed - still on login page")
+            return False
+
+    except Exception as e:
+        print(f"Login failed: {e}")
+        return False
+
+def save_session(context):
+    """
+    Saves browser session cookies to a file.
+    """
+    try:
+        cookies = context.cookies()
+        with open(SESSION_FILE, 'w') as f:
+            json.dump(cookies, f)
+        print(f"Session saved to {SESSION_FILE}")
+    except Exception as e:
+        print(f"Failed to save session: {e}")
+
+def load_session(context):
+    """
+    Loads browser session cookies from a file.
+    Returns True if session loaded successfully, False otherwise.
+    """
+    try:
+        if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE, 'r') as f:
+                cookies = json.load(f)
+            context.add_cookies(cookies)
+            print(f"Session loaded from {SESSION_FILE}")
+            return True
+        return False
+    except Exception as e:
+        print(f"Failed to load session: {e}")
+        return False
+
+def is_logged_in(page):
+    """
+    Checks if the current page shows that we're logged into Instagram.
+    """
+    try:
+        # Navigate to Instagram home to check login status
+        page.goto('https://www.instagram.com/', timeout=30000)
+        page.wait_for_load_state('networkidle')
+        time.sleep(2)
+
+        # If we see the login button, we're not logged in
+        # If we see profile/home elements, we are logged in
+        login_link = page.query_selector('a[href="/accounts/login/"]')
+
+        if login_link:
+            print("Not logged in - login link found")
+            return False
+        else:
+            print("Already logged in")
+            return True
+    except Exception as e:
+        print(f"Error checking login status: {e}")
+        return False
+
 def scrape_media(url):
     """
     Scrapes both images and videos from Instagram posts.
     Handles carousel posts by navigating through all slides.
+    Uses persistent login session to avoid Instagram's login wall.
     Returns a list of media items with URLs and types.
     """
     media_items = []
@@ -48,8 +179,24 @@ def scrape_media(url):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context()
 
+        # Try to load existing session
+        session_loaded = load_session(context)
+
+        page = context.new_page()
+
+        # If we have credentials, check if we're logged in and login if needed
+        if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
+            if not session_loaded or not is_logged_in(page):
+                # Need to login
+                if instagram_login(page):
+                    # Save session after successful login
+                    save_session(context)
+                else:
+                    print("Warning: Login failed, continuing without authentication")
+
+        # Navigate to the target post
         page.goto(url)
         page.wait_for_load_state('networkidle')
 
@@ -111,6 +258,7 @@ def scrape_media(url):
             print("Detected single post")
             media_items = extract_media_from_page(page)
 
+        context.close()
         browser.close()
 
     # Remove duplicates while preserving order
