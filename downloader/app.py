@@ -386,15 +386,24 @@ def scrape_media(url):
             max_slides = 20  # Safety limit to prevent infinite loops
             slide_count = 0
 
+            # Wait a bit to ensure first slide's images are fully loaded
+            time.sleep(2)
+
             while slide_count < max_slides:
+                print(f"Extracting media from slide {slide_count + 1}...")
+
                 # Extract media from current slide
                 current_media = extract_media_from_page(page)
 
                 # Add new media to our collection
+                new_media_count = 0
                 for media in current_media:
                     if media['url'] not in seen_urls:
                         media_items.append(media)
                         seen_urls.add(media['url'])
+                        new_media_count += 1
+
+                print(f"  Found {new_media_count} new media item(s) on slide {slide_count + 1}")
 
                 # Try to click next button
                 next_button = None
@@ -449,8 +458,21 @@ def extract_media_from_page(page):
     """
     media_items = []
 
-    # Extract images
-    img_elements = page.query_selector_all('img')
+    # Try to find the main post article container to avoid sidebar/suggested images
+    # Instagram typically puts the main post in an article element
+    article = page.query_selector('article[role="presentation"]')
+    if not article:
+        article = page.query_selector('article')
+    if not article:
+        # Fallback to entire page if we can't find article
+        article = page
+
+    print(f"Searching for media in: {('main article' if article != page else 'entire page')}")
+
+    # Extract images from within the article only
+    img_elements = article.query_selector_all('img')
+    print(f"Found {len(img_elements)} img elements in article")
+
     for img in img_elements:
         src = img.get_attribute('src')
         alt = img.get_attribute('alt') or ''
@@ -458,13 +480,30 @@ def extract_media_from_page(page):
         # Only accept images where alt text starts with "Photo by "
         # This ensures we only get post content, not profile pictures, logos, etc.
         if src and alt.startswith('Photo by '):
+            # Additional check: avoid very small images (profile pics, icons)
+            # Get image dimensions if available
+            try:
+                width = img.evaluate('el => el.naturalWidth')
+                height = img.evaluate('el => el.naturalHeight')
+
+                # Skip small images (likely profile pics or thumbnails)
+                if width and height and (width < 150 or height < 150):
+                    print(f"Skipping small image: {width}x{height}")
+                    continue
+            except:
+                # If we can't get dimensions, proceed anyway
+                pass
+
+            print(f"Found valid image: {alt[:50]}...")
             media_items.append({
                 'url': src,
                 'type': 'image'
             })
 
-    # Extract videos - handle blob URLs
-    video_elements = page.query_selector_all('video')
+    # Extract videos - handle blob URLs (also only from article)
+    video_elements = article.query_selector_all('video')
+    print(f"Found {len(video_elements)} video elements in article")
+
     for video in video_elements:
         # Try to get video source from src attribute
         src = video.get_attribute('src')
@@ -481,11 +520,12 @@ def extract_media_from_page(page):
         if src:
             # Blob URLs won't work for downloading, need to get the real URL
             if src.startswith('blob:'):
-                print(f"Found blob URL: {src}, attempting to get real URL...")
+                print(f"Found blob URL: {src[:50]}..., will be captured via network interception")
                 # Blob URLs are useless for downloading, skip for now
                 # We'll use network interception to get the real URL
                 continue
             else:
+                print(f"Found valid video URL")
                 media_items.append({
                     'url': src,
                     'type': 'video'
